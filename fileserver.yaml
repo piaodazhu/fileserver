@@ -1,0 +1,5 @@
+ip: "127.0.0.1"
+port: 9988
+rootPath: "/var/fileserver"
+docFile: "README_ZH.md"
+password: "network123"

@@ -1,0 +1,15 @@
+[Unit]
+Description=Lab101 Simple File Service
+StartLimitIntervalSec=1
+After=network.target
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=root
+ExecStart=/usr/local/bin/yourpath/fileserver -c /etc/yourpath/fileserver.yaml
+ExecStop=/bin/kill -9 $(/bin/pidof fileserver)
+ExecReload=/bin/kill -9 $(/bin/pidof fileserver) && /usr/local/bin/yourpath/fileserver -c /etc/yourpath/fileserver.yaml
+
+[Install]
+WantedBy=multi-user.target
