@@ -1,14 +1,16 @@
-# Fileserver
+# fileserver
+
 [中文](./README_ZH.md)
-## Introduction
-An extremely simple HTTP file server with minimal features.
+
+## Description
+A simple HTTP file server with minimal features.
 
 ## Features
 1. Extremely simple. No need to install specific clients; any user can directly upload and download using wget/curl.
-2. Quick deployment. Single file, statically compiled, and runs with default configuration.
-3. Web browsing. Supports basic web directory browsing and downloading.
-4. Progress query. Supports real-time progress query during file upload.
-5. Not secure. Simple password verification is performed only during upload. It is recommended for use only in trusted local networks.
+2. Fast deployment. Single-file static compilation, runs with default configurations.
+3. Web browsing. Supports simple web directory browsing and downloading.
+4. Progress tracking. Supports real-time progress tracking during file uploads.
+5. Insecure. Provides only simple password validation, rate limiting, and concurrency control. It is recommended for use only in trusted intranets.
 
 ## Service Configuration
 ```yaml
@@ -17,37 +19,36 @@ ip: "127.0.0.1"
 port: 9988
 # Local root directory for static resources
 rootPath: "/var/fileserver"
-# Password required for upload
+# Password required for uploads
 password: "network123"
-# Path to the guide document displayed on the homepage
-docFile: "README.md"
-# Single file size limit (MB)
+# Document displayed on the homepage
+docFile: "README_EN.md"
+# Maximum file upload size limit (MB)
 maxFileSize: 4096
-# Total storage space limit (MB)
+# Total size limit for root directory storage (MB)
 maxStorageSize: 20480
+# Maximum concurrency limit (requests/s)
+maxConcurrency: 5
+# Maximum service queuing time (s)
+maxQueuing: 5
+# Maximum requests per second limit (requests/s)
+maxLimit: 100
+# Maximum burst rate per second (requests/s)
+maxBurst: 10
 ```
 
 ## File Upload
 
-**New version file upload interface**
 ```sh
 # POST /rawupload -H 'password:network123' --data-binary url
-# Upload the local file "local/file.tar.gz" to the "some/path/" directory on the server, with the filename as "file"
+# Upload the local file "local/file.tar.gz" to the "some/path/" directory on the server with the filename "file"
 curl -X POST -H 'password: network123' --data-binary @local/file.tar.gz 'http://127.0.0.1:9988/rawupload/some/path/file'
 ```
 
-Old version file upload interface
-```sh
-# POST /upload -F "file=@<localfilepath>" -H 'password:network123' url
-# Upload the local file "local/file.tar.gz" to the "hello" directory on the server
-curl -X POST -F "file=@local/file.tar.gz" -H 'password:network123' http://127.0.0.1:9988/upload/hello/
-```
-
 ## File Upload Progress Query
-**Only supports** progress query for the new version file upload interface.
 ```sh
 # GET /progress url
-# Query the upload progress of some/path/file
+# Query the upload progress of "some/path/file"
 curl -X GET 'http://127.0.0.1:9988/progress/some/path/file'
 # Output progress information: Transfer percentage [Elapsed time / Estimated time] [Transferred / Total size] Rate
 # 3.03% [9.1 s / 300.4 s] [6240880 B / 206167131 B] 0.65 MB/s
@@ -61,7 +62,7 @@ curl -X GET 'http://127.0.0.1:9988/progress/some/path/file'
 wget http://127.0.0.1:9988/static/hello/file.tar.gz
 ```
 
-## File Delete
+## File Deletion
 
 ```sh
 # DELETE /delete
@@ -73,5 +74,5 @@ curl -X DELETE http://10.108.30.85:9988/delete/hello/file.tar.gz
 [-> Click here to browse <- ](http://127.0.0.1:9988/list)
 ```
 GET /list
-Access via browser at `http://127.0.0.1:9988/list`
+Access via browser `http://127.0.0.1:9988/list`
 ```

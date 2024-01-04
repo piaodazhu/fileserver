@@ -7,3 +7,7 @@ password: "network123"
 maxFileSize: 4096
 # 20 GB
 maxStorageSize: 20480
+maxConcurrency: 5
+maxQueuing: 5
+maxLimit: 100
+maxBurst: 10

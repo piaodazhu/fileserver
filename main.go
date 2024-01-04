@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -13,6 +14,8 @@ import (
 	"time"
 
 	"github.com/russross/blackfriday/v2"
+	"golang.org/x/sync/semaphore"
+	"golang.org/x/time/rate"
 
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
@@ -21,13 +24,19 @@ import (
 var configFile string
 
 type ConfigModel struct {
-	Ip             string `yaml:"ip"`
-	Port           uint16 `yaml:"port"`
-	RootPath       string `yaml:"rootPath"`
-	Password       string `yaml:"password"`
-	DocFile        string `yaml:"docFile"`
-	MaxFileSize    int64  `yaml:"maxFileSize"`
-	MaxStorageSize int64  `yaml:"maxStorageSize"`
+	Ip       string `yaml:"ip"`
+	Port     uint16 `yaml:"port"`
+	RootPath string `yaml:"rootPath"`
+	Password string `yaml:"password"`
+	DocFile  string `yaml:"docFile"`
+
+	MaxFileSize    int64 `yaml:"maxFileSize"`
+	MaxStorageSize int64 `yaml:"maxStorageSize"`
+
+	MaxConcurrency int64 `yaml:"maxConcurrency"`
+	MaxQueuing     int64 `yaml:"maxQueuing"`
+	MaxLimit       int64 `yaml:"maxLimit"`
+	MaxBurst       int64 `yaml:"maxBurst"`
 }
 
 var config ConfigModel
@@ -60,7 +69,7 @@ func initRootPath() {
 		panic("rootPath must start with /var/")
 	}
 	os.MkdirAll(config.RootPath, os.ModePerm)
-	
+
 	go func() {
 		for {
 			time.Sleep(time.Second * 5)
@@ -73,7 +82,7 @@ func initRootPath() {
 			})
 			atomic.StoreInt64(&EstimateStorageSize, total)
 		}
-	} ()
+	}()
 }
 
 func main() {
@@ -90,36 +99,11 @@ func main() {
 
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
-	engine.Use(preCheck())
+	engine.Use(concurrencyLimit(), rateLimit(), preCheck())
 	engine.Static("/static", config.RootPath)
 	engine.POST("/upload/*path", func(c *gin.Context) {
-		if c.GetHeader("password") != config.Password {
-			c.String(http.StatusUnauthorized, "[ERR] Unauthorized\n")
-			return
-		}
-
-		file, _ := c.FormFile("file")
-		if file == nil {
-			c.String(http.StatusBadRequest, "[ERR] Invalid file\n")
-			return
-		}
-
-		dst := config.RootPath + c.Param("path")
-		if dst[len(dst)-1] == '/' {
-			dst += file.Filename
-		}
-
-		c.SaveUploadedFile(file, dst)
-		c.String(http.StatusOK, fmt.Sprintf("[OK] %s --> %s\n", file.Filename, c.Param("path")))
-	})
-
-	engine.POST("/rawupload/*path", func(c *gin.Context) {
 		body := c.Request.Body
 		defer body.Close()
-		if c.GetHeader("password") != config.Password {
-			c.String(http.StatusUnauthorized, "[ERR] Unauthorized\n")
-			return
-		}
 
 		targetPath := c.Param("path")
 		if targetPath[len(targetPath)-1] == '/' {
@@ -225,11 +209,6 @@ func main() {
 	})
 
 	engine.DELETE("/delete/*path", func(c *gin.Context) {
-		if c.GetHeader("password") != config.Password {
-			c.String(http.StatusUnauthorized, "[ERR] Unauthorized\n")
-			return
-		}
-
 		targetPath := c.Param("path")
 		if targetPath[len(targetPath)-1] == '/' {
 			c.String(http.StatusBadRequest, "[ERR] Must provide a complete file path, not only directory\n")
@@ -247,7 +226,7 @@ func main() {
 			c.String(http.StatusNotFound, "[ERR] Provided path is not exists\n")
 			return
 		}
-		
+
 		os.RemoveAll(localPath)
 		c.String(http.StatusOK, fmt.Sprintf("[OK] %s delete finish\n", targetPath))
 	})
@@ -257,6 +236,33 @@ func main() {
 	})
 	if err := engine.Run(fmt.Sprintf("%s:%d", config.Ip, config.Port)); err != nil {
 		panic(err)
+	}
+}
+
+func rateLimit() gin.HandlerFunc {
+	limiter := rate.NewLimiter(rate.Limit(config.MaxLimit), int(config.MaxBurst))
+	return func(c *gin.Context) {
+		if !limiter.Allow() {
+			c.String(http.StatusForbidden, "[ERR] Request too frequent\n")
+			return
+		}
+		c.Next()
+	}
+}
+
+func concurrencyLimit() gin.HandlerFunc {
+	sem := semaphore.NewWeighted(config.MaxConcurrency)
+	return func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second * time.Duration(config.MaxQueuing))
+		defer cancel()
+
+		if err := sem.Acquire(ctx, 1); err != nil {
+			c.String(http.StatusForbidden, "[ERR] Service busy\n")
+			return
+		}
+		
+		c.Next()
+		sem.Release(1)
 	}
 }
 
@@ -280,7 +286,7 @@ func preCheck() gin.HandlerFunc {
 			return
 		}
 
-		if atomic.LoadInt64(&EstimateStorageSize) + clen > config.MaxStorageSize<<20 {
+		if atomic.LoadInt64(&EstimateStorageSize)+clen > config.MaxStorageSize<<20 {
 			c.String(http.StatusForbidden, "[ERR] No disk space for this file\n")
 			c.Abort()
 			return

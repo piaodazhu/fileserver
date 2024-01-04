@@ -7,8 +7,7 @@
 2. 快速部署。单文件静态编译，默认配置运行。
 3. Web浏览。支持简单的web目录浏览与下载。
 4. 进度查询。支持上传文件过程中，实时进度查询。
-5. 不安全。仅在上传时进行简单的密码验证，建议只在可信的内网使用。
-
+5. 不安全。仅提供简单的密码验证、流量限制和并发限制，建议只在可信的内网使用。
 
 ## 服务配置
 ```yaml
@@ -21,30 +20,29 @@ rootPath: "/var/fileserver"
 password: "network123"
 # 在主页展示的指引文档路径
 docFile: "README_ZH.md"
-# 单一文件上传大小限制 4GB
+# 单一文件上传大小限制 (MB)
 maxFileSize: 4096
-# 根目录存储空间总大小限制 20 GB
+# 根目录存储空间总大小限制 (MB)
 maxStorageSize: 20480
+# 最大并发服务数 (次/s)
+maxConcurrency: 5
+# 最大服务排队时间 (s)
+maxQueuing: 5
+# 每秒最大请求率 (次/s)
+maxLimit: 100
+# 每秒最大突发 (次/s)
+maxBurst: 10
 ```
 
 ## 文件上传
 
-**新版文件上传接口**
 ```sh
 # POST /rawupload -H 'password:network123' --data-binary url
 # 把本地文件"local/file.tar.gz"上传到服务器"some/path/"目录下，文件名为file
 curl -X POST -H 'password: network123' --data-binary @local/file.tar.gz 'http://127.0.0.1:9988/rawupload/some/path/file'
 ```
 
-旧版文件上传接口
-```sh
-# POST /upload -F "file=@<localfilepath>" -H 'password:network123' url
-# 把本地文件"local/file.tar.gz"上传到服务器的"hello"目录下
-curl -X POST -F "file=@local/file.tar.gz" -H 'password:network123' http://127.0.0.1:9988/upload/hello/
-```
-
 ## 文件上传进度查询
-**仅支持**新版文件上传接口的上传进度查询。
 ```sh
 # GET /progress url
 # 查询some/path/file的上传进度

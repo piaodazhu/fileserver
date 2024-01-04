@@ -5,6 +5,8 @@ go 1.18
 require (
 	github.com/gin-gonic/gin v1.9.1
 	github.com/russross/blackfriday/v2 v2.1.0
+	golang.org/x/sync v0.5.0
+	golang.org/x/time v0.5.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
