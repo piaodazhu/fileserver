@@ -3,11 +3,13 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/russross/blackfriday/v2"
@@ -19,11 +21,13 @@ import (
 var configFile string
 
 type ConfigModel struct {
-	Ip       string `yaml:"ip"`
-	Port     uint16 `yaml:"port"`
-	RootPath string `yaml:"rootPath"`
-	Password string `yaml:"password"`
-	DocFile  string `yaml:"docFile"`
+	Ip             string `yaml:"ip"`
+	Port           uint16 `yaml:"port"`
+	RootPath       string `yaml:"rootPath"`
+	Password       string `yaml:"password"`
+	DocFile        string `yaml:"docFile"`
+	MaxFileSize    int64  `yaml:"maxFileSize"`
+	MaxStorageSize int64  `yaml:"maxStorageSize"`
 }
 
 var config ConfigModel
@@ -42,18 +46,34 @@ func readInConfig(filename string) {
 var uploadTaskMap sync.Map
 
 type uploadTask struct {
-	uploadpath    string
+	uploadpath  string
 	localpath   string
 	totalSize   int64
 	writtenSize int64
 	createAt    time.Time
 }
 
+var EstimateStorageSize int64
+
 func initRootPath() {
 	if !strings.HasPrefix(config.RootPath, "/var/") {
 		panic("rootPath must start with /var/")
 	}
 	os.MkdirAll(config.RootPath, os.ModePerm)
+	
+	go func() {
+		for {
+			time.Sleep(time.Second * 5)
+			var total int64 = 0
+			filepath.Walk(config.RootPath, func(path string, info fs.FileInfo, err error) error {
+				if !info.IsDir() {
+					total += info.Size()
+				}
+				return nil
+			})
+			atomic.StoreInt64(&EstimateStorageSize, total)
+		}
+	} ()
 }
 
 func main() {
@@ -70,6 +90,7 @@ func main() {
 
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
+	engine.Use(preCheck())
 	engine.Static("/static", config.RootPath)
 	engine.POST("/upload/*path", func(c *gin.Context) {
 		if c.GetHeader("password") != config.Password {
@@ -95,7 +116,6 @@ func main() {
 	engine.POST("/rawupload/*path", func(c *gin.Context) {
 		body := c.Request.Body
 		defer body.Close()
-
 		if c.GetHeader("password") != config.Password {
 			c.String(http.StatusUnauthorized, "[ERR] Unauthorized\n")
 			return
@@ -115,18 +135,18 @@ func main() {
 		}
 
 		task := uploadTask{
-			uploadpath: targetPath,
-			localpath: localPath,
-			totalSize: c.Request.ContentLength,
+			uploadpath:  targetPath,
+			localpath:   localPath,
+			totalSize:   c.Request.ContentLength,
 			writtenSize: 0,
-			createAt: time.Now(),
+			createAt:    time.Now(),
 		}
 		if v, exists := uploadTaskMap.LoadOrStore(targetPath, &task); exists {
-			c.String(http.StatusBadRequest, fmt.Sprintf("[ERR] Provided path is being upload now, start at %s\n", v.(*uploadTask).createAt))
+			c.String(http.StatusForbidden, fmt.Sprintf("[ERR] Provided path is being upload now, start at %s\n", v.(*uploadTask).createAt))
 			return
 		}
 		defer uploadTaskMap.Delete(targetPath)
-		
+
 		os.MkdirAll(filepath.Dir(localPath), os.ModePerm)
 		targetFile, err := os.Create(localPath)
 		if err != nil {
@@ -149,7 +169,7 @@ func main() {
 				return
 			}
 		}
-		c.String(http.StatusOK, fmt.Sprintf("[OK] %s upload finish\n", c.Param("path")))
+		c.String(http.StatusOK, fmt.Sprintf("[OK] %s upload finish\n", targetPath))
 	})
 
 	engine.GET("/progress/*path", func(c *gin.Context) {
@@ -165,10 +185,10 @@ func main() {
 			return
 		}
 		task := *taskP
-		
+
 		cost := time.Since(task.createAt).Seconds()
 		speed := float64(task.writtenSize) / (1024 * 1024) / cost
-		estimatedCost := cost * (float64(task.totalSize)/float64(task.writtenSize))
+		estimatedCost := cost * (float64(task.totalSize) / float64(task.writtenSize))
 		c.String(http.StatusOK, fmt.Sprintf("%.2f%% [%.1f s / %.1f s] [%d B / %d B] %.2f MB/s\n", float64(task.writtenSize)*100/float64(task.totalSize), cost, estimatedCost, task.writtenSize, task.totalSize, speed))
 	})
 
@@ -203,10 +223,69 @@ func main() {
 		}
 		c.Data(http.StatusOK, "html", []byte(html.String()))
 	})
+
+	engine.DELETE("/delete/*path", func(c *gin.Context) {
+		if c.GetHeader("password") != config.Password {
+			c.String(http.StatusUnauthorized, "[ERR] Unauthorized\n")
+			return
+		}
+
+		targetPath := c.Param("path")
+		if targetPath[len(targetPath)-1] == '/' {
+			c.String(http.StatusBadRequest, "[ERR] Must provide a complete file path, not only directory\n")
+			return
+		}
+
+		if v, exists := uploadTaskMap.Load(targetPath); exists {
+			c.String(http.StatusForbidden, fmt.Sprintf("[ERR] Provided path is being upload now, start at %s\n", v.(*uploadTask).createAt))
+			return
+		}
+
+		localPath := config.RootPath + targetPath
+		_, err := os.Stat(localPath)
+		if err != nil {
+			c.String(http.StatusNotFound, "[ERR] Provided path is not exists\n")
+			return
+		}
+		
+		os.RemoveAll(localPath)
+		c.String(http.StatusOK, fmt.Sprintf("[OK] %s delete finish\n", targetPath))
+	})
+
 	engine.GET("/", func(c *gin.Context) {
 		c.Data(http.StatusOK, "text/html; charset=utf-8", blackfriday.Run(doc))
 	})
 	if err := engine.Run(fmt.Sprintf("%s:%d", config.Ip, config.Port)); err != nil {
 		panic(err)
+	}
+}
+
+func preCheck() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Method == "GET" {
+			c.Next()
+			return
+		}
+
+		if c.GetHeader("password") != config.Password {
+			c.String(http.StatusForbidden, "[ERR] Password invalid\n")
+			c.Abort()
+			return
+		}
+
+		clen := c.Request.ContentLength
+		if clen > config.MaxFileSize<<20 {
+			c.String(http.StatusForbidden, "[ERR] Uploaded file too large\n")
+			c.Abort()
+			return
+		}
+
+		if atomic.LoadInt64(&EstimateStorageSize) + clen > config.MaxStorageSize<<20 {
+			c.String(http.StatusForbidden, "[ERR] No disk space for this file\n")
+			c.Abort()
+			return
+		}
+
+		c.Next()
 	}
 }

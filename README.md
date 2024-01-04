@@ -15,15 +15,16 @@ An extremely simple HTTP file server with minimal features.
 # Service listening address
 ip: "127.0.0.1"
 port: 9988
-
 # Local root directory for static resources
 rootPath: "/var/fileserver"
-
 # Password required for upload
 password: "network123"
-
 # Path to the guide document displayed on the homepage
 docFile: "README.md"
+# Single file size limit (MB)
+maxFileSize: 4096
+# Total storage space limit (MB)
+maxStorageSize: 20480
 ```
 
 ## File Upload
@@ -58,6 +59,14 @@ curl -X GET 'http://127.0.0.1:9988/progress/some/path/file'
 # GET /static
 # Download the file "file.tar.gz" from the "hello" directory on the server
 wget http://127.0.0.1:9988/static/hello/file.tar.gz
+```
+
+## File Delete
+
+```sh
+# DELETE /delete
+# Delete the file "file.tar.gz" from the "hello" directory on the server
+curl -X DELETE http://10.108.30.85:9988/delete/hello/file.tar.gz
 ```
 
 ## Browser Access

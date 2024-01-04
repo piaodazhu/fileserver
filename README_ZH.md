@@ -15,15 +15,16 @@
 # 服务监听地址
 ip: "127.0.0.1"
 port: 9988
-
 # 静态资源本地根目录
 rootPath: "/var/fileserver"
-
 # 上传时需要提供的密码
 password: "network123"
-
 # 在主页展示的指引文档路径
 docFile: "README_ZH.md"
+# 单一文件上传大小限制 4GB
+maxFileSize: 4096
+# 根目录存储空间总大小限制 20 GB
+maxStorageSize: 20480
 ```
 
 ## 文件上传
@@ -58,6 +59,14 @@ curl -X GET 'http://127.0.0.1:9988/progress/some/path/file'
 # GET /static
 # 从服务器的"hello"目录下载文件"file.tar.gz"
 wget http://127.0.0.1:9988/static/hello/file.tar.gz
+```
+
+## 文件删除
+
+```sh
+# DELETE /delete
+# 从服务器的"hello"目录删除文件"file.tar.gz"
+curl -X DELETE http://10.108.30.85:9988/delete/hello/file.tar.gz
 ```
 
 ## 浏览器访问

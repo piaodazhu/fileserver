@@ -3,3 +3,7 @@ port: 9988
 rootPath: "/var/fileserver"
 docFile: "README_ZH.md"
 password: "network123"
+# 4 GB
+maxFileSize: 4096
+# 20 GB
+maxStorageSize: 20480
