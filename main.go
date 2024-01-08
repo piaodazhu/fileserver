@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -140,10 +141,16 @@ func main() {
 		defer targetFile.Close()
 
 		buf := make([]byte, 65536)
-		for {
+		finish := false
+		for !finish {
 			n, err := body.Read(buf)
 			if err != nil {
-				break
+				if err != io.EOF {
+					c.String(http.StatusInternalServerError, fmt.Sprintf("[ERR] Read target file from client error: %s\n", err.Error()))
+					return
+				} else {
+					finish = true
+				}
 			}
 			task.writtenSize += int64(n)
 
@@ -253,14 +260,14 @@ func rateLimit() gin.HandlerFunc {
 func concurrencyLimit() gin.HandlerFunc {
 	sem := semaphore.NewWeighted(config.MaxConcurrency)
 	return func(c *gin.Context) {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second * time.Duration(config.MaxQueuing))
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(config.MaxQueuing))
 		defer cancel()
 
 		if err := sem.Acquire(ctx, 1); err != nil {
 			c.String(http.StatusForbidden, "[ERR] Service busy\n")
 			return
 		}
-		
+
 		c.Next()
 		sem.Release(1)
 	}
